@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sample-app.fullname" . }}
+  labels:
+    {{- include "sample-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sample-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sample-app.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            {{- range .Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            # Add Spring config location to use our mounted ConfigMap
+            - name: SPRING_CONFIG_LOCATION
+              value: "file:/app/config/application.properties"
+            # Add Spring profile
+            - name: SPRING_PROFILES_ACTIVE
+              value: "kubernetes"
+            # Add API key from secret
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sample-app.fullname" . }}-secret
+                  key: api-key
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+            - name: secret-volume
+              mountPath: /app/secrets
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "sample-app.fullname" . }}-config
+        - name: secret-volume
+          secret:
+            secretName: {{ include "sample-app.fullname" . }}-secret
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

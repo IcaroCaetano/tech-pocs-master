@@ -1,0 +1,41 @@
+jenkins:
+  systemMessage: "Jenkins automatically configured via Configuration as Code (CASC) - OPEN ACCESS FOR ALL USERS"
+  securityRealm: "none"
+  authorizationStrategy:
+    unsecured: {}
+  disableRememberMe: true
+  mode: EXCLUSIVE
+  numExecutors: 0
+  scmCheckoutRetryCount: 2
+  nodes:
+    - permanent:
+        name: "static-agent"
+        remoteFS: "/home/jenkins"
+        numExecutors: 2
+        labelString: "static java docker"
+        launcher:
+          inbound:
+            workDirSettings:
+              disabled: false
+              failIfWorkDirIsMissing: false
+              internalDir: "remoting"
+  remotingSecurity:
+    enabled: true
+  slaveAgentPort: 50000
+  clouds:
+    - docker:
+        name: "docker-agent-cloud"
+        dockerApi:
+          dockerHost:
+            uri: "unix:///var/run/docker.sock"
+        templates:
+          - labelString: "docker-agent java maven"
+            dockerTemplateBase:
+              image: "jenkins-agent:java-docker-git"
+              user: root
+              mounts:
+                - "type=bind,source=/var/run/docker.sock,destination=/var/run/docker.sock"
+              privileged: true
+            remoteFs: "/home/jenkins/agent"
+            connector:
+              attach: {}

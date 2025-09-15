@@ -1,0 +1,91 @@
+# Default values for sample-app
+
+# Replica count for the deployment
+replicaCount: 2
+
+# Image configuration
+image:
+  repository: myorg/sample-api
+  tag: 1.0.0
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Pod annotations for Prometheus scraping
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/actuator/prometheus"
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /actuator/health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Environment variables
+env:
+  - name: APP_ENV
+    value: production
+  - name: LOG_LEVEL
+    value: info
+
+# ConfigMap data
+configMapData:
+  application.properties: |
+    # Spring Boot application properties
+    spring.application.name=sample-api
+    server.port=8080
+
+    # Actuator configuration
+    management.endpoints.web.exposure.include=health,info,prometheus,metrics
+    management.endpoint.health.show-details=always
+    management.endpoint.prometheus.enabled=true
+
+    # Logging configuration
+    logging.level.root=INFO
+    logging.level.com.example.api=DEBUG
+
+    # Server configuration
+    server.compression.enabled=true
+
+# Secret data (base64 encoded)
+secretData:
+  api-key: c2VjcmV0LWtleQ== # "secret-key" in base64

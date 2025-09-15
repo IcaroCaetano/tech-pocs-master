@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven'
+        jdk 'JDK21'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+    }
+
+    environment {
+        DOCKER_REGISTRY = 'ghcr.io/rbleggi/sandbox'
+    }
+
+    stages {
+        stage('Docker login Local Registry') {
+            steps {
+                withCredentials([string(credentialsId: 'GHCR_TOKEN', variable: 'GHCR_TOKEN')]) {
+                    bat 'echo %GHCR_TOKEN% | docker login ghcr.io -u rbleggi --password-stdin'
+                }
+            }
+        }
+
+         stage('Checkout Code') {
+            steps {
+                script {
+                    checkout([$class: 'GitSCM',
+                        branches: [[name: '*/master']],
+                        userRemoteConfigs: [[url: 'https://github.com/rbleggi/tech-pocs.git']]]
+                    )
+                }
+            }
+        }
+
+        stage('Build java') {
+            steps {
+                dir("devops/opentofu-k8s-deploy/app"){
+                    bat "mvn clean install -DskipTests"
+                }
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                dir("devops/opentofu-k8s-deploy/app"){
+                    bat "mvn test"
+                }
+            }
+        }
+        
+        stage('Docker build') {
+            steps {
+                dir("devops/opentofu-k8s-deploy/app"){
+                    bat "docker build -t %DOCKER_REGISTRY%/java-app:%BUILD_NUMBER% ."
+                }
+            }
+        }
+
+        stage('Docker push') {
+            steps {
+                dir("devops/opentofu-k8s-deploy/app"){
+                    bat "docker push %DOCKER_REGISTRY%/java-app:%BUILD_NUMBER%"
+                }
+            }
+        }
+
+         stage('Build Helm Chart') {
+            steps {
+                dir("devops/opentofu-k8s-deploy/helm/app") {
+                    bat 'helm lint .'
+                    bat 'helm package .'
+                }
+            }
+        }
+
+        stage('Deploy Helm Chart') {
+            steps {
+                dir("devops/opentofu-k8s-deploy/helm/app") {
+                    withEnv(["KUBECONFIG=C:\\kubeconfig\\kubeconfig.yaml"]) {
+                        bat "helm upgrade --install java-app --set image.tag=$BUILD_NUMBER ."
+                    }
+                }
+            }
+        }
+    }
+}

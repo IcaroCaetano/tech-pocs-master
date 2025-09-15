@@ -1,0 +1,25 @@
+FROM jenkins/agent:latest
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y docker.io openjdk-17-jdk maven git wget unzip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenTofu v1.6.2 (latest available)
+RUN wget -O /tmp/opentofu.zip https://github.com/opentofu/opentofu/releases/download/v1.6.2/tofu_1.6.2_linux_amd64.zip \
+    && unzip /tmp/opentofu.zip -d /tmp \
+    && mv /tmp/tofu /usr/local/bin/tofu \
+    && chmod +x /usr/local/bin/tofu \
+    && rm /tmp/opentofu.zip
+
+# Install yq for YAML processing
+RUN wget -O /usr/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64 \
+    && chmod +x /usr/bin/yq
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+ENV MAVEN_OPTS="-Dmaven.repo.local=/home/jenkins/.m2/repository"
+
+USER jenkins

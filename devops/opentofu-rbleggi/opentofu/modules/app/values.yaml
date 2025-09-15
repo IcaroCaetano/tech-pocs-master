@@ -1,0 +1,33 @@
+# Default values for the Java application
+image:
+  repository: tech-pocs/java-devops-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+prometheus:
+  enabled: true
+  path: /actuator/prometheus
+
+livenessProbe:
+  path: /actuator/health/liveness
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+readinessProbe:
+  path: /actuator/health/readiness
+  initialDelaySeconds: 30
+  periodSeconds: 5

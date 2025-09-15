@@ -1,0 +1,203 @@
+pipeline {
+    agent {
+        docker {
+            image 'docker:dind'
+            args '-u root -v /var/run/docker.sock:/var/run/docker.sock --privileged --add-host=k3s:host-gateway --add-host=host-gateway:host-gateway'
+        }
+    }
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        DOCKER_IMAGE = 'tech-pocs/java-devops-app'
+        DOCKER_TAG = "${BUILD_NUMBER}"
+        WORKSPACE = "${env.WORKSPACE}/java/devops"
+        KUBECONFIG_ORIGINAL = "${WORKSPACE}/k3s/kubeconfig.yaml"
+        KUBECONFIG_MODIFIED = "${WORKSPACE}/k3s-modified/kubeconfig.yaml"
+        KUBECONFIG = "${KUBECONFIG_MODIFIED}"
+        HELM_CHART_PATH = "${WORKSPACE}/helm/sample-app"
+        OPENTOFU_DIR = "${WORKSPACE}/opentofu"
+        INFRA_NAMESPACE = "infrastructure"
+        APP_NAMESPACE = "applications"
+    }
+
+    stages {
+        stage('Install Tools') {
+            steps {
+                echo "Installing required tools"
+                sh '''
+                # Install required tools in Alpine Linux
+                apk update
+                apk add --no-cache bash curl maven openjdk21 git
+
+                # Set Java home
+                export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+                export PATH=$JAVA_HOME/bin:$PATH
+
+                # Install kubectl
+                curl -LO "https://dl.k8s.io/release/stable.txt"
+                KUBECTL_VERSION=$(cat stable.txt)
+                curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                chmod +x kubectl
+                mv kubectl /usr/local/bin/
+
+                # Install OpenTofu
+                curl -L -o opentofu.zip https://github.com/opentofu/opentofu/releases/download/v1.6.0/tofu_1.6.0_linux_amd64.zip
+                # Use -o flag to overwrite files without prompting
+                unzip -o opentofu.zip
+                chmod +x tofu
+                mv tofu /usr/local/bin/
+                rm -f opentofu.zip
+
+                # Verify installations
+                java -version
+                mvn --version
+                docker --version
+                git --version
+                kubectl version --client
+                tofu version
+                '''
+            }
+        }
+
+        stage('Verify Agent') {
+            steps {
+                echo "Running on agent: ${env.NODE_NAME}"
+                echo "This build is NOT running on the built-in node"
+                sh 'hostname'
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'ls -la'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                echo "Running Maven tests"
+                sh '''
+                # Execute Maven tests only in the java/devops directory
+                cd java/devops
+                mvn clean test
+                '''
+            }
+            post {
+                failure {
+                    echo "Tests failed! Pipeline will stop."
+                    error "Test execution failed"
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image on agent ${env.NODE_NAME}"
+                sh """
+                    # Ensure we're in the correct directory where Dockerfile is located
+                    cd ${WORKSPACE}
+                    ls -la  # Debug: list files to confirm Dockerfile presence
+                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -f Dockerfile .
+                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Setup Kubernetes Access') {
+            steps {
+                echo "Setting up access to Kubernetes cluster"
+                sh """
+                    # Install tools needed for network diagnostics
+                    apk add --no-cache curl iputils bind-tools netcat-openbsd jq
+
+                    # List network info and DNS resolution
+                    echo "Network information:"
+                    ip addr
+
+                    # Check /etc/hosts
+                    echo "Current /etc/hosts file:"
+                    cat /etc/hosts
+
+                    # Check if k3s name resolves
+                    echo "Testing k3s hostname resolution:"
+                    getent hosts k3s || echo "Cannot resolve k3s hostname"
+
+                    # Check if localhost:6443 is accessible
+                    echo "Testing localhost:6443 connection:"
+                    nc -zv localhost 6443 || echo "Cannot connect to localhost:6443"
+
+                    # Check if host.docker.internal:6443 is accessible
+                    echo "Testing host.docker.internal:6443 connection:"
+                    nc -zv host.docker.internal 6443 || echo "Cannot connect to host.docker.internal:6443"
+
+                    # Using host-gateway (Docker's internal IP for the host)
+                    echo "Testing host-gateway:6443 connection:"
+                    nc -zv host-gateway 6443 || echo "Cannot connect to host-gateway:6443"
+
+                    # Create a directory for the modified kubeconfig
+                    mkdir -p ${WORKSPACE}/k3s-modified
+
+                    # Modify kubeconfig to use host-gateway instead of k3s or 127.0.0.1
+                    echo "Creating modified kubeconfig with host-gateway"
+                    sed -e 's|https://k3s:6443|https://host-gateway:6443|g' -e 's|https://127.0.0.1:6443|https://host-gateway:6443|g' ${KUBECONFIG_ORIGINAL} > ${KUBECONFIG_MODIFIED}
+
+                    # Debug the modified config
+                    echo "Modified kubeconfig server setting:"
+                    grep "server:" ${KUBECONFIG_MODIFIED}
+
+                    # Install Prometheus Operator CRDs for ServiceMonitor support
+                    # echo "Installing Prometheus Operator CRDs (ServiceMonitor)"
+                    # kubectl apply -f https://github.com/prometheus-operator/prometheus-operator/releases/download/v0.74.0/customresourcedefinitions.yaml
+
+                    # Test the new kubeconfig
+                    echo "Testing connection to K3s with modified kubeconfig:"
+                    kubectl --kubeconfig=${KUBECONFIG_MODIFIED} cluster-info || echo "Failed to connect to K3s"
+                """
+
+                script {
+                    env.KUBECONFIG = "${KUBECONFIG_MODIFIED}"
+                    echo "Set KUBECONFIG to ${env.KUBECONFIG}"
+                }
+            }
+        }
+
+        stage('OpenTofu Tests & Provision') {
+            steps {
+                echo "Running OpenTofu validation tests"
+                sh """
+                # Ensure we're in the correct directory where OpenTofu files are located
+                cd ${OPENTOFU_DIR}
+                ls -la  # Debug: list files to confirm OpenTofu files presence
+
+                # Validate OpenTofu configuration
+                tofu init
+                tofu validate
+
+                # Create plan and ensure it's valid
+                tofu plan -var="kubeconfig_path=${KUBECONFIG}" -out=tfplan
+
+                # Apply infrastructure changes
+                tofu apply -auto-approve tfplan
+                """
+            }
+        }
+
+    }
+
+    post {
+        always {
+            echo "Build completed on agent: ${env.NODE_NAME}"
+        }
+        success {
+            echo "Build and deployment succeeded!"
+        }
+        failure {
+            echo "Build or deployment failed!"
+        }
+    }
+}

@@ -1,0 +1,181 @@
+services:
+  k3s:
+    image: rancher/k3s:v1.25.8-k3s1
+    container_name: k3s
+    command: server --disable traefik --tls-san host-gateway
+    privileged: true
+    ports:
+      - "6443:6443"
+    environment:
+      - K3S_TOKEN=k3s-token
+      - K3S_KUBECONFIG_OUTPUT=/config/kubeconfig.yaml
+      - K3S_KUBECONFIG_MODE=666
+    volumes:
+      - k3s-data:/var/lib/rancher/k3s
+      - ./k3s:/config:rw
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  helm:
+    image: alpine/helm:3.11.1
+    container_name: helm
+    depends_on:
+      - k3s
+    ports:
+      - "6444:6443"
+    volumes:
+      - ./k3s:/config:rw
+      - ./helm:/apps
+    environment:
+      - KUBECONFIG=/config/kubeconfig.yaml
+    entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  opentofu:
+    image: ghcr.io/opentofu/opentofu:1.6.0
+    container_name: opentofu
+    depends_on:
+      - k3s
+    ports:
+      - "6445:6443"
+    volumes:
+      - ./k3s:/config:rw
+      - ./opentofu:/workspace
+    environment:
+      - KUBECONFIG=/config/kubeconfig.yaml
+    working_dir: /workspace
+    entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sample-api
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    container_name: jenkins
+    ports:
+      - "8081:8080"
+      - "50000:50000"
+    environment:
+      - JAVA_OPTS=-Xmx2g -Xms512m -Djenkins.install.runSetupWizard=false -Dhudson.model.DirectoryBrowserSupport.CSP=
+      - KUBECONFIG=/config/kubeconfig.yaml
+      - CASC_JENKINS_CONFIG=/var/jenkins_home/casc.yaml
+      - JENKINS_URL=http://localhost:8081/
+      - AUTO_CREATE_PIPELINE=true
+      - AUTO_RUN_PIPELINE=true
+      - PIPELINE_NAME=java-devops-pipeline
+      - GIT_REPO=https://github.com/rbleggi/tech-pocs.git
+      - GIT_BRANCH=master
+      - JENKINSFILE_PATH=java/devops/Jenkinsfile
+      - JENKINS_OPTS="--debug=5"
+      - TRY_UPGRADE_IF_NO_MARKER=true
+      - INSTALL_PLUGINS_SKIP_FAILED=true
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./k3s:/config:rw
+      - ./k3s:/var/jenkins_home/k3s:rw
+      - ./jenkins/casc.yaml:/var/jenkins_home/casc.yaml:ro
+      - ./:/var/jenkins_home/workspace/tech-pocs:ro
+      - ./jenkins/init.groovy.d:/var/jenkins_home/init.groovy.d:ro
+      - ./jenkins/plugins.txt:/usr/share/jenkins/ref/plugins.txt:ro
+      - ./jenkins/plugins_cache:/usr/share/jenkins/ref/plugins
+      - ./jenkins/plugins_cache:/var/jenkins_home/plugins
+      - ./maven_cache:/var/jenkins_home/.m2/repository
+    command: >
+      bash -c "
+      echo 'Installing plugins...' &&
+      jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt --verbose &&
+      echo 'Plugins installed, starting Jenkins...' &&
+      /usr/local/bin/jenkins.sh
+      "
+    user: root
+    depends_on:
+      - k3s
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8080/login || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:9.3.6
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_PATHS_DASHBOARDS=/var/lib/grafana/dashboards
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  jenkins_home:
+  prometheus_data:
+  grafana_data:
+  k3s-data:
+  jenkins_plugins_cache:
+  maven_cache:

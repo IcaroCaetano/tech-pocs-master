@@ -1,0 +1,105 @@
+# Grafana Helm chart values
+
+# Deployment configurations
+replicas: 1
+
+# Image configurations
+image:
+  repository: grafana/grafana
+  tag: 9.3.6
+  pullPolicy: IfNotPresent
+
+# Service configurations
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+# Persistence configurations
+persistence:
+  enabled: true
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 5Gi
+
+# Resource configurations
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Security configurations
+securityContext:
+  runAsUser: 472
+  runAsGroup: 472
+  fsGroup: 472
+
+# Admin user configurations
+adminUser: admin
+adminPassword: admin
+
+# Datasources configuration
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-server.infrastructure.svc.cluster.local:80
+        access: proxy
+        isDefault: true
+
+# Dashboard providers configuration
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+# Dashboards configuration
+dashboards:
+  default:
+    kubernetes-cluster:
+      gnetId: 7249
+      revision: 1
+      datasource: Prometheus
+    jenkins-performance:
+      gnetId: 9964
+      revision: 1
+      datasource: Prometheus
+
+# Grafana.ini configuration
+grafana.ini:
+  server:
+    root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana"
+  auth:
+    disable_login_form: false
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer
+  users:
+    allow_sign_up: false
+    auto_assign_org: true
+    auto_assign_org_role: Editor
+
+# RBAC configurations
+rbac:
+  create: true
+  pspEnabled: false
+
+# Service account configurations
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

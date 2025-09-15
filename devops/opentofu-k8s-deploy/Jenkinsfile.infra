@@ -1,0 +1,21 @@
+pipeline {
+    agent any
+    stages {
+        stage('Provision Infra') {
+            steps {
+                dir('devops/opentofu-k8s-deploy/infra') {
+                    bat 'tofu init'
+                    bat 'tofu apply -auto-approve'
+                    bat 'copy poc-kind-cluster-config C:\\kubeconfig\\kubeconfig.yaml'
+                }
+            }
+        }
+        stage('Test Infra') {
+            steps {
+                dir('devops/opentofu-k8s-deploy/infra') {
+                    bat 'tofu test'
+                }
+            }
+        }
+    }
+}
