@@ -1,6 +1,15 @@
 # Stage 1: Build
 FROM eclipse-temurin:23-jdk AS build
 
+
+/*
+Updates the package index.
+Installs required system tools: wget and unzip.
+Downloads the Gradle 8.5 binary distribution.
+Unzips Gradle into /opt/gradle.
+Removes the downloaded .zip to reduce image size.
+Cleans up apt cache to keep the image smaller.
+*/
 # Install Gradle
 RUN apt-get update && apt-get install -y wget unzip && \
     wget https://services.gradle.org/distributions/gradle-8.5-bin.zip && \
