@@ -2,20 +2,18 @@
 FROM eclipse-temurin:23-jdk AS build
 
 
-/*
-Updates the package index.
-Installs required system tools: wget and unzip.
-Downloads the Gradle 8.5 binary distribution.
-Unzips Gradle into /opt/gradle.
-Removes the downloaded .zip to reduce image size.
-Cleans up apt cache to keep the image smaller.
-*/
+
 # Install Gradle
 RUN apt-get update && apt-get install -y wget unzip && \
+    # Updates the package index.
     wget https://services.gradle.org/distributions/gradle-8.5-bin.zip && \
+    # Installs required system tools: wget and unzip.
     unzip gradle-8.5-bin.zip && \
+    # Unzips Gradle into /opt/gradle.
     mv gradle-8.5 /opt/gradle && \
+    # Removes the downloaded .zip to reduce image size.
     rm gradle-8.5-bin.zip && \
+    # Cleans up apt cache to keep the image smaller.
     apt-get clean
 
 ENV GRADLE_HOME=/opt/gradle
