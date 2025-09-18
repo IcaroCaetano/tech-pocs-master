@@ -38,5 +38,7 @@ WORKDIR /opt/app
 COPY --from=build /app/build/libs/*.jar app.jar
 
 EXPOSE 8080
+# Exposes port 8080 (default for Spring Boot apps).
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD curl -f http://localhost:8080/actuator/health || exit 1
+# Allows external traffic to reach the app.
 ENTRYPOINT ["java", "-XX:+UseZGC", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
